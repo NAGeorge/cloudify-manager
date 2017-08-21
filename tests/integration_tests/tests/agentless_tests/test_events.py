@@ -13,13 +13,18 @@
 #    * See the License for the specific language governing permissions and
 #    * limitations under the License.
 
+import uuid
 from datetime import datetime
-
 from integration_tests import AgentlessTestCase
 from integration_tests.framework.postgresql import run_query
 from integration_tests.tests.utils import get_resource as resource
 
 from manager_rest.flask_utils import get_postgres_conf
+
+CREATE_SNAPSHOT_SUCCESS_MSG =\
+    "'create_snapshot' workflow execution succeeded"
+RESTORE_SNAPSHOT_SUCCESS_MSG =\
+    "'restore_snapshot' workflow execution succeeded"
 
 
 class EventsTest(AgentlessTestCase):
@@ -134,6 +139,22 @@ class EventsTest(AgentlessTestCase):
                 break
         else:
             self.fail("Expected logs to be found")
+
+    def test_snapshots_events(self):
+        """ Make sure snapshots events appear when using the
+         'cfy events list' command """
+        # Make sure 'snapshots create' events appear
+        snapshot_id = str(uuid.uuid4())
+        execution = self.client.snapshots.create(snapshot_id, False, False)
+        self._wait_for_events_to_update_in_DB(
+            execution, CREATE_SNAPSHOT_SUCCESS_MSG)
+
+        # Make sure 'snapshots restore' events appear
+        self.undeploy_application(
+            self.deployment_id, is_delete_deployment=True)
+        execution = self.client.snapshots.restore(snapshot_id, force=True)
+        self._wait_for_events_to_update_in_DB(
+            execution, RESTORE_SNAPSHOT_SUCCESS_MSG)
 
     def _events_list(self, **kwargs):
         if 'deployment_id' not in kwargs:

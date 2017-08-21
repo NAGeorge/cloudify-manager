@@ -47,6 +47,7 @@ from integration_tests.framework.constants import (PLUGIN_STORAGE_DIR,
                                                    CLOUDIFY_USER)
 
 from cloudify_rest_client.executions import Execution
+from cloudify_rest_client.exceptions import CloudifyClientError
 
 
 class BaseTestCase(unittest.TestCase):
@@ -435,6 +436,48 @@ class AgentlessTestCase(BaseTestCase):
         self._setup_running_manager_attributes()
         reset_storage()
         self.addCleanup(self._save_manager_logs_after_test)
+
+    def _wait_for_restore_execution_to_end(
+            self, execution, rest_client, timeout_seconds=60):
+        """Can't use the `wait_for_execution_to_end` in the class because
+         we need to be able to handle client errors
+        """
+        deadline = time.time() + timeout_seconds
+        while execution.status not in Execution.END_STATES:
+            time.sleep(0.5)
+            # This might fail due to the fact that we're changing the DB in
+            # real time - it's OK. Just try again
+            try:
+                execution = rest_client.executions.get(execution.id)
+            except CloudifyClientError:
+                pass
+            if time.time() > deadline:
+                raise utils.TimeoutException(
+                    'Execution timed out: \n{0}'.format(
+                        json.dumps(execution, indent=2)
+                    )
+                )
+        return execution
+
+    def _wait_for_events_to_update_in_DB(
+            self, execution, message, timeout_seconds=60):
+        """ It might take longer for events to show up in the DB than it takes
+        for Execution status to return, this method waits until a specific
+        event is listed in the DB, and wil fail in case of a time out.
+        """
+
+        deadline = time.time() + timeout_seconds
+
+        while message not in [e['message'] for e
+                              in self.client.events.list(include_logs=True)]:
+            time.sleep(0.5)
+            if time.time() > deadline:
+                raise utils.TimeoutException(
+                    'Execution timed out: \n{0}'.format(
+                        json.dumps(execution, indent=2)
+                    )
+                )
+        return True
 
 
 class BaseAgentTestCase(BaseTestCase):
